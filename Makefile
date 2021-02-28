@@ -1,12 +1,19 @@
+CFLAGS = -std=gnu99 -g -Wall -Werror
+SOURCES = \
+	async.c \
+	itable.c \
+	test.c
+
 .PHONY: all
-all: async.o test.out
+all: test.out
 
-async.o: async.c async.h
-	gcc -g -c -Wall -Werror -o $@ $<
+test.out: $(SOURCES:%.c=%.o)
+	gcc $(CFLAGS) -o $@ $^
 
-test.out: test.c async.o
-	gcc -g -Wall -Werror -o $@ $^
+%.o: %.c
+	gcc $(CFLAGS) -c -o $@ $<
 
-.PHONY: clean
-clean:
-	rm -f *.o *.out
+%.d: %.c
+	gcc -MM -MT $(@:%.d=%.o) -MF $@ $<
+
+include $(SOURCES:%.c=%.d)
