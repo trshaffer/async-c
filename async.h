@@ -2,30 +2,51 @@
 #define ASYNC_H
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include <setjmp.h>
 
 // default 16KiB stack size for coroutines
 #define ASYNC_STACK_SIZE (1<<14)
 
 struct async_header {
+    bool done;
     void *stack;
     jmp_buf continuation;
-    jmp_buf caller;
 };
 
 void async_prepare_stack(void (*entry)(void *), struct async_header *hdr);
-int async_main(int (*amain)(int), int argc);
+void async_yield(struct async_header *hdr);
+void async_free(struct async_header *hdr);
+void async_free(struct async_header *hdr);
+void async_main(struct async_header *hdr);
 
 // GCC extension
 // https://gcc.gnu.org/onlinedocs/cpp/Duplication-of-Side-Effects.html
 #define AWAIT(coro) \
     ({ \
         typeof(coro) x_async_coro_ = (coro); \
-        (x_async_coro_->call)(x_async_coro_); \
+        async_yield(&x_async_coro_->hdr); \
+        x_async_coro_->retval; \
     })
 
 #define ASYNC(ident, func, ...) \
     struct X_ASYNC_CONCAT(x_async_coroutine_, func) * ident = X_ASYNC_CONCAT(x_async_create_, func) (__VA_ARGS__)
+
+#define ASYNC_FREE(coro) \
+    async_free(&(coro)->hdr)
+
+#define ASYNC_SPAWN(coro) \
+    async_spawn(&(coro)->hdr)
+
+#define ASYNC_MAIN(coro) \
+    int main(int argc, char *argv[]) { \
+        ASYNC(x_async_coro, coro, argc); \
+        async_main(&x_async_coro->hdr); \
+        int rc = x_async_coro->retval; \
+        free(x_async_coro->hdr.stack); \
+        free(x_async_coro); \
+        return rc; \
+    }
 
 #define X_ASYNC_CONCAT(x, y) \
     X_ASYNC_CONCAT_(x, y)
@@ -79,29 +100,17 @@ int async_main(int (*amain)(int), int argc);
     rtyp ident(typ0 param0); \
     struct X_ASYNC_CONCAT(x_async_coroutine_, ident) { \
         struct async_header hdr; \
-        rtyp (*call)(struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *); \
         rtyp retval; \
         typ0 arg0; \
     }; \
     void X_ASYNC_CONCAT(x_async_enter_, ident) (void *ptr) { \
         struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro = ptr; \
         coro->retval = ident(coro->arg0); \
-        longjmp(coro->hdr.caller, 1); \
-    } \
-    rtyp X_ASYNC_CONCAT(x_async_call_, ident) (struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro) { \
-        if (setjmp(coro->hdr.caller) == 0) { \
-            longjmp(coro->hdr.continuation, 1); \
-        } \
-        rtyp out = coro->retval; \
-        free(coro->hdr.stack); \
-        free(coro); \
-        return out;\
     } \
     struct X_ASYNC_CONCAT(x_async_coroutine_, ident) * X_ASYNC_CONCAT(x_async_create_, ident) (typ0 param0) { \
-        struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro = malloc(sizeof(*coro)); \
-        coro->call = X_ASYNC_CONCAT(x_async_call_, ident); \
-        coro->arg0 = param0; \
+        struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro = calloc(1, sizeof(*coro)); \
         async_prepare_stack(X_ASYNC_CONCAT(x_async_enter_, ident), &coro->hdr); \
+        coro->arg0 = param0; \
         return coro; \
     } \
     rtyp ident(typ0 param0)

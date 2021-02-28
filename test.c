@@ -6,9 +6,12 @@ ASYNC_DEF(int, foo, int, x) {
     return x + 1;
 }
 
-int main() {
+ASYNC_DEF(int, amain, int, argc) {
     ASYNC(f, foo, 100);
     int out = AWAIT(f);
+    ASYNC_FREE(f);
     printf("%d\n", out);
-    return 0;
+    return argc;
 }
+
+ASYNC_MAIN(amain)
