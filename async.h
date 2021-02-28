@@ -17,7 +17,7 @@ struct async_header {
 void async_prepare_stack(void (*entry)(void *), struct async_header *hdr);
 void async_yield(struct async_header *hdr);
 void async_free(struct async_header *hdr);
-void async_free(struct async_header *hdr);
+void async_spawn(struct async_header *hdr);
 void async_main(struct async_header *hdr);
 
 // GCC extension
@@ -38,13 +38,13 @@ void async_main(struct async_header *hdr);
 #define ASYNC_SPAWN(coro) \
     async_spawn(&(coro)->hdr)
 
-#define ASYNC_MAIN(coro) \
+#define ASYNC_MAIN(ident) \
     int main(int argc, char *argv[]) { \
-        ASYNC(x_async_coro, coro, argc); \
-        async_main(&x_async_coro->hdr); \
-        int rc = x_async_coro->retval; \
-        free(x_async_coro->hdr.stack); \
-        free(x_async_coro); \
+        ASYNC(coro, ident, argc); \
+        printf("(%p, ", coro); \
+        async_main(&coro->hdr); \
+        int rc = coro->retval; \
+        ASYNC_FREE(coro); \
         return rc; \
     }
 

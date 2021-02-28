@@ -11,6 +11,8 @@
 #include "set.h"
 
 
+// see https://www.gnu.org/software/pth/rse-pmt.ps for what all this is
+
 static jmp_buf async_ctx_main;
 static jmp_buf async_ctx_alt;
 static jmp_buf *async_continuation;
@@ -148,6 +150,10 @@ void async_free(struct async_header *hdr) {
     free(hdr);
 }
 
+void async_spawn(struct async_header *hdr) {
+    set_insert(async_ready_list, hdr);
+}
+
 void async_main(struct async_header *hdr) {
     struct async_header *done;
     struct async_header *blocked;
@@ -157,32 +163,31 @@ void async_main(struct async_header *hdr) {
     async_waiters = itable_create(0);
 
     set_insert(async_ready_list, hdr);
-    async_current_coroutine = hdr;
 
     while (async_outstanding() > 0) {
-        assert(async_current_coroutine);
-        set_remove(async_ready_list, async_current_coroutine);
-        if (setjmp(async_event_loop) == 0) {
-            longjmp(async_current_coroutine->continuation, 1);
-        }
         assert(async_current_coroutine == NULL);
-
         set_first_element(async_ready_list);
-        set_first_element(async_done_list);
         if ((async_current_coroutine = set_next_element(async_ready_list))) {
-            continue;
-        } else if ((done = set_next_element(async_done_list))) {
+            set_remove(async_ready_list, async_current_coroutine);
+            if (setjmp(async_event_loop) == 0) {
+                longjmp(async_current_coroutine->continuation, 1);
+            }
+            assert(async_current_coroutine == NULL);
+        }
+
+        set_first_element(async_done_list);
+        if ((done = set_next_element(async_done_list))) {
             set_remove(async_done_list, done);
             blocked = itable_remove(async_waiters, (uintptr_t) done);
             if (blocked == NULL) {
-                continue;
+                // spawned coroutine, so the caller can't clean up
+                // (except for main, that one's special)
+                if (done != hdr) {
+                    async_free(done);
+                }
+            } else {
+                set_insert(async_ready_list, blocked);
             }
-            set_insert(async_ready_list, blocked);
-            async_current_coroutine = blocked;
-            continue;
         }
-
-        // unreachable, every jump back will have a new ready or done entry
-        abort();
     }
 }
