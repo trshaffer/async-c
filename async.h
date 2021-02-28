@@ -7,7 +7,13 @@
 // default 16KiB stack size for coroutines
 #define ASYNC_STACK_SIZE (1<<14)
 
-void *async_prepare_stack(void (*entry)(void *), void *arg, jmp_buf *continuation);
+struct async_header {
+    void *stack;
+    jmp_buf continuation;
+    jmp_buf caller;
+};
+
+void async_prepare_stack(void (*entry)(void *), struct async_header *hdr);
 int async_main(int (*amain)(int), int argc);
 
 // GCC extension
@@ -72,32 +78,30 @@ int async_main(int (*amain)(int), int argc);
 #define X_ASYNC_DEF_2(rtyp, ident, typ0, param0) \
     rtyp ident(typ0 param0); \
     struct X_ASYNC_CONCAT(x_async_coroutine_, ident) { \
+        struct async_header hdr; \
         rtyp (*call)(struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *); \
-        void *stack; \
-        jmp_buf continuation; \
-        jmp_buf caller; \
         rtyp retval; \
         typ0 arg0; \
     }; \
     void X_ASYNC_CONCAT(x_async_enter_, ident) (void *ptr) { \
         struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro = ptr; \
         coro->retval = ident(coro->arg0); \
-        longjmp(coro->caller, 1); \
+        longjmp(coro->hdr.caller, 1); \
     } \
     rtyp X_ASYNC_CONCAT(x_async_call_, ident) (struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro) { \
-        if (setjmp(coro->caller) == 0) { \
-            longjmp(coro->continuation, 1); \
+        if (setjmp(coro->hdr.caller) == 0) { \
+            longjmp(coro->hdr.continuation, 1); \
         } \
         rtyp out = coro->retval; \
-        free(coro->stack); \
+        free(coro->hdr.stack); \
         free(coro); \
         return out;\
     } \
     struct X_ASYNC_CONCAT(x_async_coroutine_, ident) * X_ASYNC_CONCAT(x_async_create_, ident) (typ0 param0) { \
         struct X_ASYNC_CONCAT(x_async_coroutine_, ident) *coro = malloc(sizeof(*coro)); \
         coro->call = X_ASYNC_CONCAT(x_async_call_, ident); \
-        coro->stack = async_prepare_stack(X_ASYNC_CONCAT(x_async_enter_, ident), coro, &coro->continuation); \
         coro->arg0 = param0; \
+        async_prepare_stack(X_ASYNC_CONCAT(x_async_enter_, ident), &coro->hdr); \
         return coro; \
     } \
     rtyp ident(typ0 param0)

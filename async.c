@@ -13,20 +13,20 @@ static jmp_buf async_ctx_alt;
 static jmp_buf *async_continuation;
 static sig_atomic_t async_handler_done;
 static void (*async_start_func)(void *);
-static void *async_arg;
+static struct async_header *async_hdr;
 static sigset_t async_creat_sigs;
 
 
 static void async_boot(void) {
     void (*start_func) (void *);
-    void *arg;
+    void *hdr;
 
     // Step 10
     sigprocmask(SIG_SETMASK, &async_creat_sigs, NULL);
 
     // Step 11
     start_func = async_start_func;
-    arg = async_arg;
+    hdr = async_hdr;
 
     // Step 12 & 13
     if (setjmp(*async_continuation) == 0) {
@@ -34,7 +34,7 @@ static void async_boot(void) {
     }
 
     // Magic
-    start_func((void *) arg);
+    start_func(hdr);
 
     // Unreachable
     abort();
@@ -51,7 +51,7 @@ static void async_trampoline(int sig) {
     async_boot();
 }
 
-void *async_prepare_stack(void (*start_func)(void *), void *arg, jmp_buf *continuation) {
+void async_prepare_stack(void (*start_func)(void *), struct async_header *hdr) {
     struct sigaction tsa;
     struct sigaction osa;
     stack_t tss;
@@ -59,8 +59,8 @@ void *async_prepare_stack(void (*start_func)(void *), void *arg, jmp_buf *contin
     sigset_t tsigs;
     sigset_t osigs;
 
-    void *stack = malloc(ASYNC_STACK_SIZE);
-    if (stack == NULL) {
+    hdr->stack = malloc(ASYNC_STACK_SIZE);
+    if (hdr->stack == NULL) {
         abort();
     }
 
@@ -76,14 +76,14 @@ void *async_prepare_stack(void (*start_func)(void *), void *arg, jmp_buf *contin
     sigaction(SIGUSR1, &tsa, &osa);
 
     // Step 3
-    tss.ss_sp = stack;
+    tss.ss_sp = hdr->stack;
     tss.ss_size = ASYNC_STACK_SIZE;
     tss.ss_flags = 0;
     sigaltstack(&tss, &oss);
 
     // Step 4
-    async_continuation = continuation;
-    async_arg = arg;
+    async_continuation = &hdr->continuation;
+    async_hdr = hdr;
     async_start_func = start_func;
     async_creat_sigs = osigs;
     async_handler_done = false;
@@ -110,7 +110,7 @@ void *async_prepare_stack(void (*start_func)(void *), void *arg, jmp_buf *contin
     }
 
     // Step 14
-    return stack;
+    return;
 }
 
 int async_main(int (*amain)(int), int argc) {
